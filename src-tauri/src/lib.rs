@@ -12,6 +12,8 @@ use parking_lot::Mutex;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
+    tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -676,6 +678,33 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             set_accessory_app_policy();
+
+            let open_item = MenuItemBuilder::with_id("open", "Open Tudu").build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
+            let quit_item = PredefinedMenuItem::quit(app, None)?;
+            let tray_menu = MenuBuilder::new(app)
+                .items(&[&open_item, &settings_item])
+                .separator()
+                .item(&quit_item)
+                .build()?;
+            let icon = app
+                .default_window_icon()
+                .cloned()
+                .expect("bundled window icon missing");
+            let _ = TrayIconBuilder::with_id("tudu-tray")
+                .icon(icon)
+                .icon_as_template(true)
+                .menu(&tray_menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => summon_window(app),
+                    "settings" => {
+                        summon_window(app);
+                        let _ = app.emit("open-settings", ());
+                    }
+                    _ => {}
+                })
+                .build(app)?;
 
             if let Some(win) = handle.get_webview_window("main") {
                 #[cfg(target_os = "macos")]

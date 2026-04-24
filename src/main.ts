@@ -585,6 +585,11 @@ async function init() {
     }
   });
 
+  await listen("open-settings", () => {
+    state.view = "settings";
+    render();
+  });
+
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (state.view === "settings") {
