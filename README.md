@@ -85,8 +85,17 @@ Make sure the script is executable: `chmod +x hooks/claude-tudu-hook.py`.
 
 ### What the hook does and doesn't do
 
-- **Does**: append new todos from Claude, update completion marks when content matches, preserve block IDs across updates, safely handle multiple concurrent Claude sessions (fcntl lock).
-- **Does not**: delete a Tudu task when Claude drops it from its list (cautious by design — never touches user-added tasks). Match on rephrased content (dedup is by text). Fire if Claude chooses not to call `TodoWrite` for a given exchange.
+- **Does**: append tasks where `tool_input.metadata.tudu == true`, update completion marks when content matches, preserve block IDs across updates, safely handle multiple concurrent Claude sessions (fcntl lock).
+- **Does not**: sync every TaskCreate call — only ones flagged `metadata.tudu = true`. This keeps Claude's internal implementation breakdown out of your user-facing list. Delete a Tudu task when Claude drops it from its session. Match on rephrased content (dedup is by text).
+
+### Claude's convention (via memory)
+
+The `aggressive_todo_tracking` memory file in `.claude/projects/.../memory/` instructs Claude to:
+- set `metadata: {tudu: true}` on the high-level TaskCreate that matches what the user asked for
+- leave `metadata.tudu` unset on implementation subtasks Claude creates for its own planning
+- include `metadata: {tudu: true}` again on the TaskUpdate that marks it completed
+
+Tudu ends up showing "Fix failing ERC test" instead of seven steps like "check endpoint", "add index", "run tests"…
 
 ## Configuration file
 

@@ -110,9 +110,19 @@ def sync(path: Path, todos: list[dict]) -> None:
 
 
 def extract_todos(payload: dict) -> list[dict]:
-    """Normalize a TaskCreate / TaskUpdate payload to a [{content, status}] list."""
+    """Normalize a TaskCreate / TaskUpdate payload to a [{content, status}] list.
+
+    Only tasks with metadata.tudu == true sync. Claude sets this flag on
+    user-facing top-level work; internal implementation subtasks stay out
+    of the Tudu list.
+    """
     tool_input = payload.get("tool_input") or {}
     tool_response = payload.get("tool_response") or {}
+
+    meta_in = tool_input.get("metadata") or {}
+    meta_res = tool_response.get("metadata") or {}
+    if not (meta_in.get("tudu") or meta_res.get("tudu")):
+        return []
 
     subject = (tool_input.get("subject") or tool_response.get("subject") or "").strip()
     if not subject:
