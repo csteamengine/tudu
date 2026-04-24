@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code PostToolUse hook for TodoWrite → Tudu vault sync.
+"""Claude Code PostToolUse hook for TaskCreate/TaskUpdate → Tudu vault sync.
 
 Wire up in ~/.claude/settings.json:
 
@@ -7,7 +7,7 @@ Wire up in ~/.claude/settings.json:
     "hooks": {
       "PostToolUse": [
         {
-          "matcher": "TodoWrite",
+          "matcher": "TaskCreate|TaskUpdate",
           "hooks": [
             {"type": "command", "command": "/absolute/path/to/claude-tudu-hook.py"}
           ]
@@ -17,7 +17,7 @@ Wire up in ~/.claude/settings.json:
   }
 
 Environment overrides:
-  TUDU_CLAUDE_LIST        - list name (default "Claude"), writes <vault>/<list>.md
+  TUDU_CLAUDE_LIST        - list name (default "todo"), writes <vault>/<list>.md
   TUDU_CLAUDE_SYNC_STATUS - "0" to skip mirroring completion state (default on)
 """
 import fcntl
@@ -110,29 +110,15 @@ def sync(path: Path, todos: list[dict]) -> None:
 
 
 def extract_todos(payload: dict) -> list[dict]:
-    """Normalize tool payloads to a list of {content, status} entries.
-
-    Supports TodoWrite (tool_input.todos: [{content, status}])
-    and the newer TaskCreate / TaskUpdate tools
-    (tool_input.subject/description/status).
-    """
+    """Normalize a TaskCreate / TaskUpdate payload to a [{content, status}] list."""
     tool_input = payload.get("tool_input") or {}
     tool_response = payload.get("tool_response") or {}
-    tool_name = payload.get("tool_name", "")
-
-    todos = tool_input.get("todos")
-    if isinstance(todos, list) and todos:
-        return todos
 
     subject = (tool_input.get("subject") or tool_response.get("subject") or "").strip()
-    status = (
-        tool_input.get("status")
-        or tool_response.get("status")
-        or ("completed" if tool_name == "TaskUpdate" and tool_input.get("completed") else "pending")
-    )
-    if subject:
-        return [{"content": subject, "status": status}]
-    return []
+    if not subject:
+        return []
+    status = tool_input.get("status") or tool_response.get("status") or "pending"
+    return [{"content": subject, "status": status}]
 
 
 def main() -> int:

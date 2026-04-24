@@ -1,11 +1,11 @@
 ---
 name: tudu-setup
-description: Configure the Tudu ↔ Claude Code integration so Claude's TodoWrite calls auto-sync into a Tudu list (a Markdown file in the user's vault). Invoke when the user asks to install, set up, configure, or wire up Tudu, the Tudu hook, or the Claude-to-Tudu TodoWrite sync.
+description: Configure the Tudu ↔ Claude Code integration so Claude's TaskCreate / TaskUpdate calls auto-sync into a Tudu list (a Markdown file in the user's vault). Invoke when the user asks to install, set up, configure, or wire up Tudu, the Tudu hook, or the Claude-to-Tudu task sync.
 ---
 
 # Tudu setup
 
-Your job: help the user wire `hooks/claude-tudu-hook.py` from the Tudu repo into their `~/.claude/settings.json` as a `PostToolUse` hook matching `TodoWrite`, so every session's todos mirror into a Markdown list file in their vault.
+Your job: help the user wire `hooks/claude-tudu-hook.py` from the Tudu repo into their `~/.claude/settings.json` as a `PostToolUse` hook matching `TaskCreate|TaskUpdate`, so every session's todos mirror into a Markdown list file in their vault.
 
 Keep this interaction short. Ask only what you need to. Do the edits for them; show a diff before writing.
 
@@ -36,7 +36,7 @@ Merge in this block under `hooks.PostToolUse`:
 
 ```jsonc
 {
-  "matcher": "TodoWrite",
+  "matcher": "TaskCreate|TaskUpdate",
   "hooks": [
     {
       "type": "command",
@@ -50,7 +50,7 @@ Merge in this block under `hooks.PostToolUse`:
 **Merge semantics — don't clobber:**
 
 - If `hooks.PostToolUse` already exists, append the new entry (don't replace the array).
-- If there's already a `TodoWrite` matcher entry, ask the user: replace it, add this hook alongside the existing command, or skip.
+- If there's already a matcher entry for `TaskCreate|TaskUpdate`, ask the user: replace it, add this hook alongside the existing command, or skip.
 - Preserve the rest of `settings.json` exactly — comments, ordering, other hooks, other top-level keys.
 
 Show the user the proposed change as a diff before writing. Wait for confirmation.
@@ -60,7 +60,7 @@ Show the user the proposed change as a diff before writing. Wait for confirmatio
 After writing, verify by piping a sample payload through the hook script:
 
 ```sh
-echo '{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Tudu setup verification","status":"pending"}]}}' \
+echo '{"tool_name":"TaskCreate","tool_input":{"subject":"Tudu setup verification","status":"pending"}}' \
   | <absolute-path-to-hook>
 ```
 

@@ -66,7 +66,7 @@ Add to `~/.claude/settings.json`:
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "TodoWrite",
+        "matcher": "TaskCreate|TaskUpdate",
         "hooks": [
           { "type": "command", "command": "/absolute/path/to/tudu/hooks/claude-tudu-hook.py" }
         ]
