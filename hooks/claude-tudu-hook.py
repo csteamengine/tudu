@@ -109,12 +109,38 @@ def sync(path: Path, todos: list[dict]) -> None:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
+def extract_todos(payload: dict) -> list[dict]:
+    """Normalize tool payloads to a list of {content, status} entries.
+
+    Supports TodoWrite (tool_input.todos: [{content, status}])
+    and the newer TaskCreate / TaskUpdate tools
+    (tool_input.subject/description/status).
+    """
+    tool_input = payload.get("tool_input") or {}
+    tool_response = payload.get("tool_response") or {}
+    tool_name = payload.get("tool_name", "")
+
+    todos = tool_input.get("todos")
+    if isinstance(todos, list) and todos:
+        return todos
+
+    subject = (tool_input.get("subject") or tool_response.get("subject") or "").strip()
+    status = (
+        tool_input.get("status")
+        or tool_response.get("status")
+        or ("completed" if tool_name == "TaskUpdate" and tool_input.get("completed") else "pending")
+    )
+    if subject:
+        return [{"content": subject, "status": status}]
+    return []
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except Exception:
         return 0
-    todos = (payload.get("tool_input") or {}).get("todos") or []
+    todos = extract_todos(payload)
     if not todos:
         return 0
     try:
