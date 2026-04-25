@@ -27,11 +27,14 @@ type View = "tasks" | "settings";
 
 type DropZone = "before" | "after" | "inside";
 
+type VaultInfo = { name: string; subpath: string };
+
 const state = {
   lists: [] as string[],
   currentList: null as string | null,
   tree: [] as TaskNode[],
   config: null as Config | null,
+  vaultInfo: null as VaultInfo | null,
   view: "tasks" as View,
   addingSubFor: null as string | null,
   collapsed: new Set<string>(),
@@ -53,7 +56,11 @@ function buildTree(flat: Task[]): TaskNode[] {
   return roots;
 }
 
-async function loadConfig() { state.config = await invoke<Config>("get_config"); }
+async function loadConfig() {
+  state.config = await invoke<Config>("get_config");
+  try { state.vaultInfo = await invoke<VaultInfo | null>("get_vault_info"); }
+  catch { state.vaultInfo = null; }
+}
 
 async function loadLists() {
   state.lists = await invoke<string[]>("list_lists");
@@ -127,6 +134,66 @@ async function saveConfig(partial: Partial<Config>) {
   const newConfig = { ...(state.config as Config), ...partial };
   await invoke("set_config", { newConfig });
   state.config = newConfig;
+}
+
+// Match either an Obsidian internal link (`[[Note]]` / `![[embed]]`) or a
+// standard markdown link `[label](url)`. The Obsidian alternative is consumed
+// first so its inner brackets can't be misread as a markdown link.
+const LINK_RE = /(!?)\[\[([^\]\n]+)\]\]|\[([^\[\]\n]+)\]\(([^)\s]+)\)/g;
+
+function obsidianUrl(target: string): string | null {
+  const info = state.vaultInfo;
+  if (!info) return null;
+  const encoded = encodeURIComponent(target).replace(/%23/g, "#").replace(/%5E/gi, "^").replace(/%2F/gi, "/");
+  return `obsidian://open?vault=${encodeURIComponent(info.name)}&file=${encoded}`;
+}
+
+function makeLinkAnchor(display: string, url: string, className: string): HTMLAnchorElement {
+  const a = document.createElement("a");
+  a.textContent = display;
+  a.className = className;
+  a.setAttribute("contenteditable", "false");
+  a.href = url;
+  a.title = "⌘+click to open";
+  a.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      invoke("open_url", { url }).catch(() => {});
+    }
+  });
+  a.addEventListener("click", (e) => {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+  return a;
+}
+
+function renderTaskText(span: HTMLElement, text: string) {
+  span.textContent = "";
+  let last = 0;
+  for (const m of text.matchAll(LINK_RE)) {
+    const idx = m.index!;
+    if (idx > last) span.append(document.createTextNode(text.slice(last, idx)));
+    if (m[2] !== undefined) {
+      const inner = m[2];
+      const pipe = inner.indexOf("|");
+      const target = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
+      const display = (pipe >= 0 ? inner.slice(pipe + 1) : inner).trim();
+      const url = obsidianUrl(target);
+      if (url) {
+        span.append(makeLinkAnchor(display, url, "md-link wiki-link"));
+      } else {
+        span.append(document.createTextNode(m[0]));
+      }
+    } else {
+      span.append(makeLinkAnchor(m[3], m[4], "md-link"));
+    }
+    last = idx + m[0].length;
+  }
+  if (last < text.length) span.append(document.createTextNode(text.slice(last)));
 }
 
 function el(tag: string, props: Record<string, any> = {}, ...children: (Node | string)[]): HTMLElement {
@@ -210,6 +277,41 @@ function computeZone(e: DragEvent, row: HTMLElement): DropZone {
   if (y < h * 0.28) return "before";
   if (y > h * 0.72) return "after";
   return "inside";
+}
+
+let autoScrollRAF: number | null = null;
+let lastDragClientY = 0;
+
+function startAutoScroll() {
+  if (autoScrollRAF !== null) return;
+  const step = () => {
+    autoScrollRAF = null;
+    if (!state.dragId) return;
+    const tasks = document.querySelector(".tasks") as HTMLElement | null;
+    if (tasks) {
+      const rect = tasks.getBoundingClientRect();
+      const threshold = 48;
+      const maxSpeed = 18;
+      let dy = 0;
+      if (lastDragClientY < rect.top + threshold) {
+        const intensity = (rect.top + threshold - lastDragClientY) / threshold;
+        dy = -Math.ceil(Math.min(1, intensity) * maxSpeed);
+      } else if (lastDragClientY > rect.bottom - threshold) {
+        const intensity = (lastDragClientY - (rect.bottom - threshold)) / threshold;
+        dy = Math.ceil(Math.min(1, intensity) * maxSpeed);
+      }
+      if (dy !== 0) tasks.scrollTop += dy;
+    }
+    autoScrollRAF = requestAnimationFrame(step);
+  };
+  autoScrollRAF = requestAnimationFrame(step);
+}
+
+function stopAutoScroll() {
+  if (autoScrollRAF !== null) {
+    cancelAnimationFrame(autoScrollRAF);
+    autoScrollRAF = null;
+  }
 }
 
 function clearDropIndicators() {
@@ -300,15 +402,20 @@ function renderTaskNode(t: TaskNode, depth: number): HTMLElement {
   const text = el("span", {
     class: "text",
     contentEditable: "true",
+    onfocus: (e: Event) => {
+      (e.target as HTMLElement).textContent = t.text;
+    },
     onblur: (e: Event) => {
       const v = (e.target as HTMLElement).innerText.trim();
       if (v && v !== t.text) editTask(t.id, v);
       else if (!v) deleteTask(t.id);
+      else renderTaskText(e.target as HTMLElement, t.text);
     },
     onkeydown: (e: KeyboardEvent) => {
       if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLElement).blur(); }
     },
-  }, t.text);
+  });
+  renderTaskText(text, t.text);
 
   const actions = el("span", { class: "actions" },
     el("button", {
@@ -362,18 +469,46 @@ function renderTaskNode(t: TaskNode, depth: number): HTMLElement {
         e.dataTransfer.effectAllowed = "move";
       }
       row.classList.add("dragging");
+      lastDragClientY = e.clientY;
+      startAutoScroll();
     },
     ondragend: () => {
       state.dragId = null;
       row.classList.remove("dragging");
       row.removeAttribute("draggable");
       clearDropIndicators();
+      stopAutoScroll();
     },
-  }, handle, check, text, actions, caretRight);
+  }, check, text, actions, caretRight, handle);
 
-  handle.addEventListener("mousedown", () => {
+  const TEXT_EDIT_BUFFER = 6;
+
+  row.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button, a, input, .check, .caret-right")) return;
+
+    // Measure the actual rendered text glyphs (handles wrapped lines), not the
+    // flex-expanded span — so the empty space to the right of short text is
+    // drag territory, not edit territory.
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const rects = Array.from(range.getClientRects());
+    let minDist = Infinity;
+    for (const r of rects) {
+      const dx = Math.max(r.left - e.clientX, e.clientX - r.right, 0);
+      const dy = Math.max(r.top - e.clientY, e.clientY - r.bottom, 0);
+      minDist = Math.min(minDist, Math.hypot(dx, dy));
+    }
+    if (minDist < TEXT_EDIT_BUFFER) return;
+
+    // Drag territory: disable contentEditable so the click can't focus the
+    // text (which would swap rendered markdown back to plain text). We can't
+    // use preventDefault here — webkit treats that as cancelling dragstart.
+    text.contentEditable = "false";
     row.setAttribute("draggable", "true");
     const cleanup = () => {
+      text.contentEditable = "true";
       if (state.dragId !== t.id) row.removeAttribute("draggable");
       document.removeEventListener("mouseup", cleanup);
     };
@@ -588,6 +723,17 @@ async function init() {
   await listen("open-settings", () => {
     state.view = "settings";
     render();
+  });
+
+  document.addEventListener("dragover", (e) => {
+    if (!state.dragId) return;
+    lastDragClientY = e.clientY;
+  });
+
+  document.addEventListener("dragend", () => {
+    state.dragId = null;
+    stopAutoScroll();
+    clearDropIndicators();
   });
 
   document.addEventListener("keydown", (e) => {

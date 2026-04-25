@@ -230,6 +230,34 @@ html, body {
   text-decoration: line-through;
 }
 
+.task .text .md-link {
+  color: #6cb6ff;
+  text-decoration: underline;
+  text-decoration-color: rgba(108, 182, 255, 0.4);
+  cursor: pointer;
+}
+
+.task .text .md-link:hover {
+  text-decoration-color: #6cb6ff;
+}
+
+.task.done .text .md-link {
+  color: rgba(108, 182, 255, 0.5);
+}
+
+.task .text .wiki-link {
+  color: #b48cff;
+  text-decoration-color: rgba(180, 140, 255, 0.4);
+}
+
+.task .text .wiki-link:hover {
+  text-decoration-color: #b48cff;
+}
+
+.task.done .text .wiki-link {
+  color: rgba(180, 140, 255, 0.5);
+}
+
 .task .actions {
   display: inline-flex;
   gap: 4px;

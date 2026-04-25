@@ -1,6 +1,6 @@
 [package]
 name = "tudu"
-version = "0.1.0"
+version = "0.1.1"
 description = "Floating todo panel backed by an Obsidian vault file"
 authors = ["charlie"]
 edition = "2021"

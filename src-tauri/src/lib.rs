@@ -584,6 +584,97 @@ fn set_suppress_hide(suppress: bool, state: tauri::State<AppState>) {
     *state.suppress_hide.lock() = suppress;
 }
 
+#[derive(serde::Serialize)]
+struct VaultInfo {
+    name: String,
+    subpath: String,
+}
+
+#[tauri::command]
+fn get_vault_info(state: tauri::State<AppState>) -> Option<VaultInfo> {
+    let folder = PathBuf::from(&state.config.lock().vault_folder);
+    let mut dir = folder.as_path();
+    let mut segments: Vec<String> = Vec::new();
+    loop {
+        if dir.join(".obsidian").is_dir() {
+            let name = dir.file_name()?.to_string_lossy().to_string();
+            segments.reverse();
+            return Some(VaultInfo { name, subpath: segments.join("/") });
+        }
+        match dir.parent() {
+            Some(p) if p != dir => {
+                if let Some(seg) = dir.file_name() {
+                    segments.push(seg.to_string_lossy().to_string());
+                }
+                dir = p;
+            }
+            _ => return None,
+        }
+    }
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let scheme_ok = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("mailto:")
+        || url.starts_with("obsidian://");
+    if !scheme_ok {
+        return Err(format!("refusing to open url with disallowed scheme: {}", url));
+    }
+    let is_web = url.starts_with("http://") || url.starts_with("https://");
+    #[cfg(target_os = "macos")]
+    {
+        if is_web {
+            let status = std::process::Command::new("open")
+                .args(["-a", "Google Chrome", &url])
+                .status()
+                .map_err(|e| e.to_string())?;
+            if !status.success() {
+                std::process::Command::new("open")
+                    .arg(&url)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+        } else {
+            std::process::Command::new("open")
+                .arg(&url)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if is_web {
+            let _ = std::process::Command::new("google-chrome")
+                .arg(&url)
+                .spawn()
+                .or_else(|_| std::process::Command::new("xdg-open").arg(&url).spawn())
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("xdg-open")
+                .arg(&url)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if is_web {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "chrome", &url])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &url])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn hide_window(app: AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
@@ -645,6 +736,8 @@ pub fn run() {
             toggle_window,
             hide_window,
             set_suppress_hide,
+            open_url,
+            get_vault_info,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
