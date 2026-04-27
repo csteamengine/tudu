@@ -11,9 +11,6 @@ on:
 
 jobs:
   build:
-    permissions:
-      contents: write
-
     strategy:
       fail-fast: false
       matrix:
@@ -49,13 +46,39 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: 'Tudu ${{ github.event.inputs.tag || github.ref_name }}'
-          releaseBody: |
-            macOS ${{ matrix.arch }} build.
+          args: --target ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tudu-${{ matrix.arch }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: 'Tudu ${{ github.event.inputs.tag || github.ref_name }}'
+          draft: false
+          prerelease: false
+          files: artifacts/**/*
+          body: |
+            macOS build (arm64 + x64).
 
             **Install**
             1. Download the `.dmg` for your Mac (arm64 for Apple Silicon, x64 for Intel).
@@ -64,6 +87,3 @@ jobs:
                ```
                xattr -cr /Applications/Tudu.app
                ```
-          releaseDraft: true
-          prerelease: false
-          args: --target ${{ matrix.target }}
