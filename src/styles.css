@@ -409,3 +409,57 @@ html, body {
 
 .topbar-spacer { width: 40px; flex-shrink: 0; }
 
+.settings .updates-row {
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.settings .updates-row .inline-btn {
+  border-radius: 6px;
+  padding: 7px 14px;
+  flex: 0 0 auto;
+}
+
+.settings .update-status {
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.settings .update-status.up-to-date { color: rgba(120, 220, 140, 0.85); }
+.settings .update-status.available { color: rgba(255, 200, 90, 0.95); }
+.settings .update-status.error { color: rgba(255, 130, 130, 0.9); }
+.settings .update-status .release-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.settings-version {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+}
+
+.settings-version .github-link {
+  color: rgba(255,255,255,0.55);
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.settings-version .github-link:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.08);
+}
+

@@ -29,12 +29,25 @@ type DropZone = "before" | "after" | "inside";
 
 type VaultInfo = { name: string; subpath: string };
 
+type UpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "up-to-date"; latest: string }
+  | { kind: "available"; latest: string; url: string }
+  | { kind: "error"; message: string };
+
+const REPO_OWNER = "csteamengine";
+const REPO_NAME = "tudu";
+const REPO_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}`;
+
 const state = {
   lists: [] as string[],
   currentList: null as string | null,
   tree: [] as TaskNode[],
   config: null as Config | null,
   vaultInfo: null as VaultInfo | null,
+  appVersion: null as string | null,
+  updateStatus: { kind: "idle" } as UpdateStatus,
   view: "tasks" as View,
   addingSubFor: null as string | null,
   collapsed: new Set<string>(),
@@ -60,6 +73,47 @@ async function loadConfig() {
   state.config = await invoke<Config>("get_config");
   try { state.vaultInfo = await invoke<VaultInfo | null>("get_vault_info"); }
   catch { state.vaultInfo = null; }
+  if (state.appVersion === null) {
+    try { state.appVersion = await invoke<string>("get_version"); }
+    catch { state.appVersion = null; }
+  }
+}
+
+function compareVersions(a: string, b: string): number {
+  const parse = (s: string) => s.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+  const pa = parse(a), pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function checkForUpdates() {
+  if (state.updateStatus.kind === "checking") return;
+  state.updateStatus = { kind: "checking" };
+  if (state.view === "settings") render();
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/tags?per_page=20`, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!r.ok) throw new Error(`GitHub returned ${r.status}`);
+    const data = await r.json() as Array<{ name: string }>;
+    const versionTags = data
+      .map((t) => t.name)
+      .filter((name) => /^v?\d+(\.\d+){0,2}$/.test(name))
+      .sort((a, b) => compareVersions(b, a));
+    const latest = versionTags[0];
+    if (!latest) throw new Error("no version tags found");
+    const current = state.appVersion ?? "0.0.0";
+    const url = `${REPO_URL}/releases/tag/${latest}`;
+    state.updateStatus = compareVersions(latest, current) > 0
+      ? { kind: "available", latest, url }
+      : { kind: "up-to-date", latest };
+  } catch (err) {
+    state.updateStatus = { kind: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+  if (state.view === "settings") render();
 }
 
 async function loadLists() {
@@ -682,13 +736,65 @@ function renderSettings() {
     el("span", {}, "Sticky (stay visible when unfocused)"),
   );
 
+  const status = state.updateStatus;
+  const statusEl = el("span", { class: `update-status ${status.kind}` });
+  if (status.kind === "checking") statusEl.textContent = "Checking…";
+  else if (status.kind === "up-to-date") statusEl.textContent = `Up to date (${status.latest})`;
+  else if (status.kind === "available") {
+    statusEl.append(
+      document.createTextNode(`New version available: `),
+      el("a", {
+        class: "release-link",
+        onclick: (e: Event) => {
+          e.preventDefault();
+          if (status.kind === "available") invoke("open_url", { url: status.url }).catch(() => {});
+        },
+      }, status.latest),
+    );
+  } else if (status.kind === "error") statusEl.textContent = `Check failed: ${status.message}`;
+
+  const checkBtn = el("button", {
+    type: "button",
+    class: "inline-btn",
+    onclick: () => checkForUpdates(),
+  }, status.kind === "checking" ? "Checking…" : "Check for updates");
+
+  const versionLine = el("div", { class: "settings-version" },
+    el("span", { class: "version-label" }, `Tudu v${state.appVersion ?? "?"}`),
+    el("a", {
+      class: "github-link",
+      title: "Open repository on GitHub",
+      onclick: (e: Event) => {
+        e.preventDefault();
+        invoke("open_url", { url: REPO_URL }).catch(() => {});
+      },
+    }, githubIcon()),
+  );
+
+  const updatesRow = el("div", { class: "input-group updates-row" }, checkBtn, statusEl);
+
   const body = el("div", { class: "settings" },
     el("label", {}, "Vault folder", folderRow),
     el("label", {}, "Global hotkey", hotkeyRow),
     stickyRow,
+    el("label", {}, "Updates", updatesRow),
+    versionLine,
   );
 
   app.append(topbar, body);
+}
+
+function githubIcon(): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("fill", "currentColor");
+  path.setAttribute("d", "M8 .2a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8.2 8 8 0 0 0 8 .2Z");
+  svg.append(path);
+  return svg;
 }
 
 async function init() {
@@ -723,6 +829,12 @@ async function init() {
   await listen("open-settings", () => {
     state.view = "settings";
     render();
+  });
+
+  await listen("check-updates", () => {
+    state.view = "settings";
+    render();
+    checkForUpdates();
   });
 
   document.addEventListener("dragover", (e) => {

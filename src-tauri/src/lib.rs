@@ -614,6 +614,11 @@ fn get_vault_info(state: tauri::State<AppState>) -> Option<VaultInfo> {
 }
 
 #[tauri::command]
+fn get_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     let scheme_ok = url.starts_with("http://")
         || url.starts_with("https://")
@@ -738,6 +743,7 @@ pub fn run() {
             set_suppress_hide,
             open_url,
             get_vault_info,
+            get_version,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -774,9 +780,10 @@ pub fn run() {
 
             let open_item = MenuItemBuilder::with_id("open", "Open Tudu").build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
+            let updates_item = MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
             let quit_item = PredefinedMenuItem::quit(app, None)?;
             let tray_menu = MenuBuilder::new(app)
-                .items(&[&open_item, &settings_item])
+                .items(&[&open_item, &settings_item, &updates_item])
                 .separator()
                 .item(&quit_item)
                 .build()?;
@@ -794,6 +801,11 @@ pub fn run() {
                     "settings" => {
                         summon_window(app);
                         let _ = app.emit("open-settings", ());
+                    }
+                    "check-updates" => {
+                        summon_window(app);
+                        let _ = app.emit("open-settings", ());
+                        let _ = app.emit("check-updates", ());
                     }
                     _ => {}
                 })
