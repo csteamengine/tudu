@@ -448,11 +448,12 @@ fn order_front_without_activating(win: &tauri::WebviewWindow) {
 
     let Ok(ns_ptr) = win.ns_window() else { return };
     if ns_ptr.is_null() { return; }
-    let ns_window: id = ns_ptr as id;
-    unsafe {
-        let nil: id = std::ptr::null_mut();
-        let _: () = msg_send![ns_window, makeKeyAndOrderFront: nil];
-    }
+    let ns_ptr = ns_ptr as usize;
+    let handle = win.app_handle().clone();
+    let _ = handle.run_on_main_thread(move || unsafe {
+        let ns_window: id = ns_ptr as id;
+        let _: () = msg_send![ns_window, orderFrontRegardless];
+    });
 }
 
 fn monitor_key(m: &Monitor, app: &AppHandle) -> String {
