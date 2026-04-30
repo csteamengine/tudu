@@ -53,9 +53,36 @@ const state = {
   collapsed: new Set<string>(),
   creatingList: false,
   dragId: null as string | null,
+  completedCollapsed: true,
 };
 
 const app = document.getElementById("content")!;
+
+const MAX_UNDO = 50;
+const undoStack: string[] = [];
+const redoStack: string[] = [];
+
+function pushUndo() {
+  undoStack.push(JSON.stringify(state.tree));
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack.length = 0;
+}
+
+async function undo() {
+  if (undoStack.length === 0 || !state.currentList) return;
+  redoStack.push(JSON.stringify(state.tree));
+  state.tree = JSON.parse(undoStack.pop()!);
+  await saveTree();
+  render();
+}
+
+async function redo() {
+  if (redoStack.length === 0 || !state.currentList) return;
+  undoStack.push(JSON.stringify(state.tree));
+  state.tree = JSON.parse(redoStack.pop()!);
+  await saveTree();
+  render();
+}
 
 function buildTree(flat: Task[]): TaskNode[] {
   const byId = new Map<string, TaskNode>();
@@ -155,6 +182,7 @@ async function createList(name: string) {
 async function addTask(text: string, parent: string | null = null) {
   text = text.trim();
   if (!text || !state.currentList) return;
+  pushUndo();
   await invoke("add_task", { list: state.currentList, text, parent });
   await loadTasks();
   render();
@@ -162,8 +190,17 @@ async function addTask(text: string, parent: string | null = null) {
 
 async function toggleTask(id: string, done: boolean) {
   if (!state.currentList) return;
+  pushUndo();
   await invoke("toggle_task", { list: state.currentList, id, done });
   await loadTasks();
+  if (!done) {
+    const idx = state.tree.findIndex(n => n.id === id);
+    if (idx > 0) {
+      const [node] = state.tree.splice(idx, 1);
+      state.tree.unshift(node);
+      await saveTree();
+    }
+  }
   render();
 }
 
@@ -174,6 +211,7 @@ async function editTask(id: string, text: string) {
 
 async function deleteTask(id: string) {
   if (!state.currentList) return;
+  pushUndo();
   await invoke("delete_task", { list: state.currentList, id });
   await loadTasks();
   render();
@@ -268,6 +306,10 @@ function render() {
   renderTasks();
 }
 
+function isFullyDone(node: TaskNode): boolean {
+  return node.done && node.children.every(isFullyDone);
+}
+
 function findAndRemove(tree: TaskNode[], id: string): TaskNode | null {
   for (let i = 0; i < tree.length; i++) {
     if (tree[i].id === id) return tree.splice(i, 1)[0];
@@ -306,6 +348,7 @@ async function performDrop(dragId: string, targetId: string, zone: DropZone) {
   if (!dragNode) return;
   if (isDescendant(dragNode, targetId)) return;
 
+  pushUndo();
   const removed = findAndRemove(state.tree, dragId);
   if (!removed) return;
 
@@ -424,7 +467,25 @@ function renderTree(container: HTMLElement) {
       if (n.children.length > 0 && !state.collapsed.has(n.id)) walk(n.children, depth + 1);
     }
   };
-  walk(state.tree, 0);
+
+  const active = state.tree.filter(n => !isFullyDone(n));
+  const completed = state.tree.filter(n => isFullyDone(n));
+
+  walk(active, 0);
+
+  if (completed.length > 0) {
+    const count = completed.length;
+    const arrow = state.completedCollapsed ? "▸" : "▾";
+    const header = el("div", {
+      class: "completed-header",
+      onclick: () => { state.completedCollapsed = !state.completedCollapsed; render(); },
+    },
+      el("span", { class: "completed-arrow" }, arrow),
+      el("span", {}, `Completed (${count})`),
+    );
+    container.append(header);
+    if (!state.completedCollapsed) walk(completed, 0);
+  }
 }
 
 function renderInlineSubInput(parentId: string, depth: number): HTMLElement {
@@ -575,6 +636,7 @@ function renderTaskNode(t: TaskNode, depth: number): HTMLElement {
 let composeInputRef: HTMLInputElement | null = null;
 
 function renderTasks() {
+  const prevScroll = document.querySelector(".tasks")?.scrollTop ?? 0;
   app.innerHTML = "";
   composeInputRef = null;
 
@@ -611,6 +673,7 @@ function renderTasks() {
   else list.append(el("div", { class: "empty" }, "No lists yet. Click + above to create one."));
 
   app.append(topbar, list, compose);
+  list.scrollTop = prevScroll;
   if (state.currentList && !state.addingSubFor && !state.creatingList) input.focus();
 }
 
@@ -849,6 +912,12 @@ async function init() {
   });
 
   document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+      return;
+    }
     if (e.key !== "Escape") return;
     if (state.view === "settings") {
       e.preventDefault();
